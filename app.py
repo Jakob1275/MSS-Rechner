@@ -488,7 +488,7 @@ with st.expander("🔬 Sensitivitätsanalyse"):
         ax_sens.legend()
         ax_sens.grid(alpha=0.3)
         st.pyplot(fig_sens)
---- FOOTER ---
+#--- FOOTER ---
 st.divider()
 st.caption("""
 Hinweis: Diese Berechnung basiert auf den angegebenen Parametern und dient als Entscheidungshilfe.
