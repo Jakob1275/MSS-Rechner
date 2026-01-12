@@ -605,7 +605,7 @@ def generate_html_report():
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Amortisation</div>
-                    <div class="metric-value">{amortisation:.1f if amortisation else 'N/A'} Jahre</div>
+                    <div class="metric-value">{f"{amortisation:.1f}" if amortisation else "N/A"} Jahre</div>
                     <div class="metric-sub">{'✅ Wirtschaftlich' if amortisation and amortisation < n else '⚠️ Kritisch prüfen'}</div>
                 </div>
             </div>
