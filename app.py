@@ -12,18 +12,158 @@ st.set_page_config(page_title="Wirtschaftlichkeitsvergleich Maschinen", layout="
 st.title("📊 Wirtschaftlichkeitsvergleich: Manuell vs. Automation")
 st.markdown("""
 Detaillierter Vergleich zweier Investitionsalternativen mit Fixkosten, variablen Kosten,
-Stückkostenkalkulation, Break-Even-Analyse und Amortisationsrechnung.
+Stückkostenkalkulation, Break-Even-Analyse, Amortisation und Barwert (NPV).
 """)
 
-# --- SIDEBAR: MASCHINENPARAMETER ---
+# =========================
+# BERECHNUNGSFUNKTIONEN
+# =========================
+def berechne_mss(ak, n, zins, wartung_satz, raum, r_preis, vers, werkzeug, h_jahr, nutzgrad, kw, s_preis, restwert=0.0):
+    """
+    Berechnet Maschinenstundensatz und Kostenkomponenten
+    - AfA: linear auf Basis (AK - Restwert)
+    - Kalk. Zinsen: auf durchschnittlich gebundenes Kapital ~ (AK + Restwert)/2
+    """
+    afa_basis = max(0.0, ak - restwert)
+    afa = afa_basis / n if n > 0 else 0.0
+
+    geb_kapital_mittel = (ak + restwert) / 2.0
+    zinsen = geb_kapital_mittel * zins
+
+    wartung = ak * wartung_satz
+    raumkosten = raum * r_preis * 12
+    fix_jahr = afa + zinsen + wartung + raumkosten + vers + werkzeug
+
+    stunden_effektiv = h_jahr * nutzgrad
+    mss_fix = fix_jahr / stunden_effektiv if stunden_effektiv > 0 else 0.0
+    mss_var = kw * s_preis
+
+    return {
+        'mss_fix': mss_fix,
+        'mss_var': mss_var,
+        'fix_jahr': fix_jahr,
+        'stunden_effektiv': stunden_effektiv,
+        'afa': afa,
+        'zinsen': zinsen,
+        'wartung': wartung,
+        'raumkosten': raumkosten,
+        'versicherung': vers,
+        'werkzeug': werkzeug
+    }
+
+def kalkuliere_programm_detail(df, mss_fix, mss_var, lohn, bedien_faktor, machine="A"):
+    """Detaillierte Kalkulation mit Stückkostenaufschlüsselung (maschine A oder B)"""
+    details = []
+    ges_kosten = 0.0
+    ges_stunden = 0.0
+    ges_stueck = 0
+
+    if machine == "A":
+        col_bearb = "Bearbzeit (min/Stk) A"
+        col_ruest = "Rüstzeit (min) A"
+        ruest_bedien_faktor = 1.0
+    else:
+        col_bearb = "Bearbzeit (min/Stk) B"
+        col_ruest = "Rüstzeit (min) B"
+        ruest_bedien_faktor = 1.0
+
+    for _, row in df.iterrows():
+        serie = row["Serie"]
+        serien_jahr = float(row["Serien/Jahr"])
+        stueck_serie = float(row["Stück/Serie"])
+
+        t_bearb_min = float(row[col_bearb])
+        t_ruest_min = float(row[col_ruest])
+
+        stueck_jahr = serien_jahr * stueck_serie
+        t_bearb_h = (stueck_jahr * t_bearb_min) / 60.0
+        t_ruest_h = (serien_jahr * t_ruest_min) / 60.0
+
+        # Bearbeitung (Automation über Bedienfaktor)
+        mss_gesamt_bearb = mss_fix + mss_var + (lohn * bedien_faktor)
+        kosten_bearb = t_bearb_h * mss_gesamt_bearb
+
+        # Rüsten (typisch: volle Bedienung)
+        mss_gesamt_ruest = mss_fix + mss_var + (lohn * ruest_bedien_faktor)
+        kosten_ruest = t_ruest_h * mss_gesamt_ruest
+
+        kosten_ges = kosten_bearb + kosten_ruest
+        kosten_stueck = kosten_ges / stueck_jahr if stueck_jahr > 0 else 0.0
+
+        details.append({
+            'Serie': serie,
+            'Stück/Jahr': int(stueck_jahr),
+            'Zeit Bearb (h)': round(t_bearb_h, 1),
+            'Zeit Rüst (h)': round(t_ruest_h, 1),
+            'Kosten Bearb (€)': round(kosten_bearb, 2),
+            'Kosten Rüst (€)': round(kosten_ruest, 2),
+            'Kosten Gesamt (€)': round(kosten_ges, 2),
+            'Kosten/Stück (€)': round(kosten_stueck, 2)
+        })
+
+        ges_kosten += float(kosten_ges)
+        ges_stunden += float(t_bearb_h + t_ruest_h)
+        ges_stueck += int(stueck_jahr)
+
+    return {
+        'details': pd.DataFrame(details),
+        'ges_kosten': float(ges_kosten),
+        'ges_stunden': float(ges_stunden),
+        'ges_stueck': int(ges_stueck)
+    }
+
+def fig_to_base64(fig):
+    """Konvertiert Matplotlib Figure zu Base64 für HTML-Einbettung"""
+    buf = BytesIO()
+    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    buf.seek(0)
+    img_str = base64.b64encode(buf.read()).decode()
+    plt.close(fig)
+    return f"data:image/png;base64,{img_str}"
+
+def npv_alternative(ak_a, ak_b, rest_a, rest_b, annual_saving, zins, n_years):
+    """
+    NPV aus Sicht 'B statt A'
+      t=0: - (AK_B - AK_A)
+      t=1..n: + annual_saving
+      t=n: + (Rest_B - Rest_A)
+    """
+    mehrinvest = ak_b - ak_a
+    npv = -mehrinvest
+
+    for t in range(1, n_years + 1):
+        npv += annual_saving / ((1 + zins) ** t)
+
+    npv += (rest_b - rest_a) / ((1 + zins) ** n_years)
+    return float(npv)
+
+def kapazitaetscheck(result, res):
+    if res['stunden_effektiv'] <= 0:
+        return False, 0.0
+    auslastung = result['ges_stunden'] / res['stunden_effektiv']
+    ok = result['ges_stunden'] <= res['stunden_effektiv']
+    return ok, float(auslastung)
+
+# =========================
+# SIDEBAR: MASCHINENPARAMETER
+# =========================
 with st.sidebar:
     st.header("⚙️ Grundparameter")
-    ak = st.number_input("Anschaffungskosten (pro Maschine) [€]", value=600000, step=10000)
+
+    ak_a = st.number_input("Anschaffungskosten Maschine A [€]", value=600000, step=10000)
+    ak_b = st.number_input("Anschaffungskosten Maschine B [€]", value=950000, step=10000)
+
     n = st.number_input("Nutzungsdauer [Jahre]", value=20, step=1, min_value=1)
     zins_satz = st.slider("Kalk. Zinssatz [%]", 0.0, 10.0, 5.0, 0.5) / 100
+
     lohn_satz = st.number_input("Lohnsatz (belastet) [€/h]", value=65.0, step=1.0)
     strom_preis = st.number_input("Strompreis [€/kWh]", value=0.30, step=0.01)
     raum_preis = st.number_input("Raumkosten [€/m²/Monat]", value=15.0, step=1.0)
+
+    st.divider()
+    st.caption("Optional (für Barwert/NPV): Restwert am Ende der Nutzungsdauer")
+    restwert_a = st.number_input("Restwert A am Ende [€]", value=0, step=10000, min_value=0)
+    restwert_b = st.number_input("Restwert B am Ende [€]", value=0, step=10000, min_value=0)
 
     st.divider()
     st.subheader("🔧 Maschine A (Manuell)")
@@ -50,36 +190,18 @@ with st.sidebar:
     vers_b = st.number_input("Versicherung B [€/Jahr]", value=1200, step=100)
     werkzeug_b = st.number_input("Werkzeugkosten B [€/Jahr]", value=8000, step=500)
 
-# --- BERECHNUNGSFUNKTIONEN ---
-def berechne_mss(ak, n, zins, wartung_satz, raum, r_preis, vers, werkzeug, h_jahr, nutzgrad, kw, s_preis):
-    """Berechnet Maschinenstundensatz und Kostenkomponenten"""
-    afa = ak / n
-    zinsen = (ak / 2) * zins
-    wartung = ak * wartung_satz
-    raumkosten = raum * r_preis * 12
-    fix_jahr = afa + zinsen + wartung + raumkosten + vers + werkzeug
-    stunden_effektiv = h_jahr * nutzgrad
-    mss_fix = fix_jahr / stunden_effektiv if stunden_effektiv > 0 else 0
-    mss_var = kw * s_preis
-    return {
-        'mss_fix': mss_fix,
-        'mss_var': mss_var,
-        'fix_jahr': fix_jahr,
-        'stunden_effektiv': stunden_effektiv,
-        'afa': afa,
-        'zinsen': zinsen,
-        'wartung': wartung,
-        'raumkosten': raumkosten,
-        'versicherung': vers,
-        'werkzeug': werkzeug
-    }
+# =========================
+# MSS / Fixkosten je Maschine
+# =========================
+res_a = berechne_mss(ak_a, n, zins_satz, wartung_a, raum_a, raum_preis, vers_a, werkzeug_a,
+                     h_jahr_a, nutzgrad_a, energie_a, strom_preis, restwert=restwert_a)
 
-res_a = berechne_mss(ak, n, zins_satz, wartung_a, raum_a, raum_preis, vers_a, werkzeug_a,
-                     h_jahr_a, nutzgrad_a, energie_a, strom_preis)
-res_b = berechne_mss(ak, n, zins_satz, wartung_b, raum_b, raum_preis, vers_b, werkzeug_b,
-                     h_jahr_b, nutzgrad_b, energie_b, strom_preis)
+res_b = berechne_mss(ak_b, n, zins_satz, wartung_b, raum_b, raum_preis, vers_b, werkzeug_b,
+                     h_jahr_b, nutzgrad_b, energie_b, strom_preis, restwert=restwert_b)
 
-# --- PRODUKTIONSPROGRAMM ---
+# =========================
+# PRODUKTIONSPROGRAMM
+# =========================
 st.header("📋 Produktionsprogramm")
 st.write("Definieren Sie die zu fertigenden Serien. Sie können Zeilen hinzufügen oder löschen.")
 
@@ -108,142 +230,115 @@ df_serien = st.data_editor(
     }
 )
 
-def kalkuliere_programm_detail(df, mss_fix, mss_var, lohn, faktor):
-    """Detaillierte Kalkulation mit Stückkostenaufschlüsselung"""
-    details = []
-    ges_kosten = 0
-    ges_stunden = 0
-    ges_stueck = 0
+# Programm-Kalkulation
+result_a = kalkuliere_programm_detail(df_serien, res_a['mss_fix'], res_a['mss_var'], lohn_satz, bedien_a, machine="A")
+result_b = kalkuliere_programm_detail(df_serien, res_b['mss_fix'], res_b['mss_var'], lohn_satz, bedien_b, machine="B")
 
-    for _, row in df.iterrows():
-        serie = row["Serie"]
-        serien_jahr = row["Serien/Jahr"]
-        stueck_serie = row["Stück/Serie"]
+# Kapazitätscheck
+ok_a, ausl_a = kapazitaetscheck(result_a, res_a)
+ok_b, ausl_b = kapazitaetscheck(result_b, res_b)
 
-        if "Bearbzeit (min/Stk) A" in df.columns:
-            machine = "A"
-            t_bearb_min = row["Bearbzeit (min/Stk) A"]
-            t_ruest_min = row["Rüstzeit (min) A"]
-        else:
-            machine = "B"
-            t_bearb_min = row["Bearbzeit (min/Stk) B"]
-            t_ruest_min = row["Rüstzeit (min) B"]
+if not ok_a:
+    st.error(f"❌ Kapazität reicht nicht für Maschine A ({name_a}). "
+             f"Benötigt: {result_a['ges_stunden']:.0f} h, verfügbar: {res_a['stunden_effektiv']:.0f} h "
+             f"(Auslastung: {ausl_a*100:.1f}%).")
 
-        stueck_jahr = serien_jahr * stueck_serie
-        t_bearb_h = (stueck_jahr * t_bearb_min) / 60
-        t_ruest_h = (serien_jahr * t_ruest_min) / 60
+if not ok_b:
+    st.error(f"❌ Kapazität reicht nicht für Maschine B ({name_b}). "
+             f"Benötigt: {result_b['ges_stunden']:.0f} h, verfügbar: {res_b['stunden_effektiv']:.0f} h "
+             f"(Auslastung: {ausl_b*100:.1f}%).")
 
-        mss_gesamt = mss_fix + mss_var + (lohn * faktor)
-        kosten_bearb = t_bearb_h * mss_gesamt
+vergleich_ok = ok_a and ok_b
+if not vergleich_ok:
+    st.warning("⚠️ Achtung: Mindestens eine Alternative kann das Produktionsprogramm kapazitiv nicht abbilden. "
+               "Kostenvergleich ist dann nur eingeschränkt interpretierbar (Überstunden, Fremdvergabe oder Zusatzmaschine nötig).")
 
-        mss_ruest = mss_fix + mss_var + lohn
-        kosten_ruest = t_ruest_h * mss_ruest
-
-        kosten_ges = kosten_bearb + kosten_ruest
-        kosten_stueck = kosten_ges / stueck_jahr if stueck_jahr > 0 else 0
-
-        details.append({
-            'Serie': serie,
-            'Stück/Jahr': int(stueck_jahr),
-            'Zeit Bearb (h)': round(t_bearb_h, 1),
-            'Zeit Rüst (h)': round(t_ruest_h, 1),
-            'Kosten Bearb (€)': round(kosten_bearb, 2),
-            'Kosten Rüst (€)': round(kosten_ruest, 2),
-            'Kosten Gesamt (€)': round(kosten_ges, 2),
-            'Kosten/Stück (€)': round(kosten_stueck, 2)
-        })
-
-        ges_kosten += kosten_ges
-        ges_stunden += (t_bearb_h + t_ruest_h)
-        ges_stueck += stueck_jahr
-
-    return {
-        'details': pd.DataFrame(details),
-        'ges_kosten': ges_kosten,
-        'ges_stunden': ges_stunden,
-        'ges_stueck': ges_stueck
-    }
-
-df_a = df_serien.copy()
-df_b = df_serien.copy()
-
-result_a = kalkuliere_programm_detail(df_a, res_a['mss_fix'], res_a['mss_var'], lohn_satz, bedien_a)
-result_b = kalkuliere_programm_detail(df_b, res_b['mss_fix'], res_b['mss_var'], lohn_satz, bedien_b)
-
-def fig_to_base64(fig):
-    """Konvertiert Matplotlib Figure zu Base64 für HTML-Einbettung"""
-    buf = BytesIO()
-    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-    buf.seek(0)
-    img_str = base64.b64encode(buf.read()).decode()
-    plt.close(fig)
-    return f"data:image/png;base64,{img_str}"
-
-# --- KERNERGEBNISSE ---
+# =========================
+# KERNERGEBNISSE
+# =========================
 st.divider()
 st.header("🎯 Kernergebnisse")
+
+ersparnis = result_a['ges_kosten'] - result_b['ges_kosten']
+ersparnis_proz = (ersparnis / result_a['ges_kosten'] * 100) if result_a['ges_kosten'] > 0 else 0.0
+mehrinvest = ak_b - ak_a
 
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric(
-        "Kosten Maschine A",
-        f"{result_a['ges_kosten']:,.0f} €",
-        help="Gesamtkosten für das Produktionsprogramm pro Jahr"
-    )
-    auslastung_a = (result_a['ges_stunden'] / res_a['stunden_effektiv'] * 100) if res_a['stunden_effektiv'] > 0 else 0
-    st.caption(f"⏱️ Auslastung: {auslastung_a:.1f}% ({result_a['ges_stunden']:.0f}/{res_a['stunden_effektiv']:.0f} h)")
+    st.metric("Kosten Maschine A", f"{result_a['ges_kosten']:,.0f} €",
+              help="Gesamtkosten für das Produktionsprogramm pro Jahr")
+    st.caption(f"⏱️ Auslastung: {ausl_a*100:.1f}% ({result_a['ges_stunden']:.0f}/{res_a['stunden_effektiv']:.0f} h)")
 
 with col2:
-    st.metric(
-        "Kosten Maschine B",
-        f"{result_b['ges_kosten']:,.0f} €",
-        help="Gesamtkosten für das Produktionsprogramm pro Jahr"
-    )
-    auslastung_b = (result_b['ges_stunden'] / res_b['stunden_effektiv'] * 100) if res_b['stunden_effektiv'] > 0 else 0
-    st.caption(f"⏱️ Auslastung: {auslastung_b:.1f}% ({result_b['ges_stunden']:.0f}/{res_b['stunden_effektiv']:.0f} h)")
+    st.metric("Kosten Maschine B", f"{result_b['ges_kosten']:,.0f} €",
+              help="Gesamtkosten für das Produktionsprogramm pro Jahr")
+    st.caption(f"⏱️ Auslastung: {ausl_b*100:.1f}% ({result_b['ges_stunden']:.0f}/{res_b['stunden_effektiv']:.0f} h)")
 
 with col3:
-    ersparnis = result_a['ges_kosten'] - result_b['ges_kosten']
-    ersparnis_proz = (ersparnis / result_a['ges_kosten'] * 100) if result_a['ges_kosten'] > 0 else 0
-    st.metric(
-        "Ersparnis/Jahr",
-        f"{ersparnis:,.0f} €",
-        delta=f"{ersparnis_proz:.1f}%",
-        delta_color="normal" if ersparnis > 0 else "inverse",
-        help="Positive Werte bedeuten: Maschine B ist günstiger"
-    )
+    st.metric("Ersparnis/Jahr", f"{ersparnis:,.0f} €",
+              delta=f"{ersparnis_proz:.1f}%",
+              delta_color="normal" if ersparnis > 0 else "inverse",
+              help="Positive Werte bedeuten: Maschine B ist günstiger")
 
 with col4:
-    if ersparnis > 0:
-        fix_differenz = res_b['fix_jahr'] - res_a['fix_jahr']
-        amortisation = fix_differenz / ersparnis if ersparnis > 0 else 999
-        st.metric(
-            "Amortisation",
-            f"{amortisation:.1f} Jahre",
-            help="Zeit bis sich Mehrinvestition amortisiert"
-        )
+    # Amortisation korrekt: (AK_B - AK_A) / jährliche Einsparung
+    if ersparnis > 0 and mehrinvest > 0:
+        amortisation = mehrinvest / ersparnis
+        st.metric("Amortisation", f"{amortisation:.1f} Jahre",
+                  help="(AK_B - AK_A) / jährliche Einsparung")
         if amortisation < n:
             st.success("✅ Wirtschaftlich")
         else:
             st.warning("⚠️ Kritisch prüfen")
+    elif ersparnis > 0 and mehrinvest <= 0:
+        amortisation = 0.0
+        st.metric("Amortisation", "0.0 Jahre",
+                  help="B ist nicht teurer in der Anschaffung und spart jährlich → sofort wirtschaftlich.")
+        st.success("✅ Wirtschaftlich")
     else:
         amortisation = None
         st.metric("Amortisation", "N/A")
-        st.info("ℹ️ Maschine A günstiger")
+        st.info("ℹ️ Keine Einsparung durch B")
 
+# Empfehlungstext (mit Hinweis auf Kapazität)
 if ersparnis > 0:
     empfehlung_text = f"""**💡 Empfehlung: Maschine B ({name_b})** ist wirtschaftlich vorteilhaft mit einer
-    jährlichen Ersparnis von **{ersparnis:,.0f} €** ({ersparnis_proz:.1f}%).
-    Die Mehrkosten amortisieren sich in **{amortisation:.1f} Jahren**."""
+    jährlichen Ersparnis von **{ersparnis:,.0f} €** ({ersparnis_proz:.1f}%)."""
+    if mehrinvest > 0 and amortisation is not None:
+        empfehlung_text += f" Die Mehrinvestition amortisiert sich in **{amortisation:.1f} Jahren**."
+    if not vergleich_ok:
+        empfehlung_text += " **Hinweis:** Kapazität ist nicht für beide Alternativen gegeben → Vergleich eingeschränkt."
     st.success(empfehlung_text)
 else:
     empfehlung_text = f"""**💡 Empfehlung: Maschine A ({name_a})** ist bei diesem Produktionsprogramm die
-    wirtschaftlichere Lösung. Maschine B ist **{abs(ersparnis):,.0f} €** teurer pro Jahr.
-    Prüfen Sie höhere Stückzahlen oder Zusatzaufträge."""
+    wirtschaftlichere Lösung. Maschine B ist **{abs(ersparnis):,.0f} €** teurer pro Jahr."""
+    if not vergleich_ok:
+        empfehlung_text += " **Hinweis:** Kapazität ist nicht für beide Alternativen gegeben → Vergleich eingeschränkt."
     st.warning(empfehlung_text)
 
-# --- MSS-VERGLEICH ---
+# NPV / Barwert
+st.divider()
+st.subheader("📌 Barwert (NPV) der Alternative B gegenüber A")
+if vergleich_ok:
+    npv_b_vs_a = npv_alternative(
+        ak_a=ak_a, ak_b=ak_b,
+        rest_a=restwert_a, rest_b=restwert_b,
+        annual_saving=ersparnis,
+        zins=zins_satz,
+        n_years=n
+    )
+    if npv_b_vs_a >= 0:
+        st.success(f"✅ NPV (B statt A): {npv_b_vs_a:,.0f} €  → B ist aus Barwertsicht vorteilhaft.")
+    else:
+        st.warning(f"⚠️ NPV (B statt A): {npv_b_vs_a:,.0f} €  → A ist aus Barwertsicht vorteilhafter.")
+else:
+    npv_b_vs_a = None
+    st.info("NPV wird nicht ausgewertet, da mindestens eine Alternative kapazitiv nicht machbar ist.")
+
+# =========================
+# MSS-VERGLEICH
+# =========================
 st.divider()
 st.header("💰 Maschinenstundensatz (MSS)")
 
@@ -256,12 +351,7 @@ with col_mss1:
 
     data_mss_a = pd.DataFrame({
         'Komponente': ['Fixkosten', 'Energie', 'Personal', 'GESAMT'],
-        'Betrag [€/h]': [
-            res_a['mss_fix'],
-            res_a['mss_var'],
-            mss_personal_a,
-            mss_gesamt_a
-        ]
+        'Betrag [€/h]': [res_a['mss_fix'], res_a['mss_var'], mss_personal_a, mss_gesamt_a]
     })
     st.dataframe(data_mss_a.style.format({'Betrag [€/h]': '{:.2f}'}), use_container_width=True)
 
@@ -272,16 +362,13 @@ with col_mss2:
 
     data_mss_b = pd.DataFrame({
         'Komponente': ['Fixkosten', 'Energie', 'Personal', 'GESAMT'],
-        'Betrag [€/h]': [
-            res_b['mss_fix'],
-            res_b['mss_var'],
-            mss_personal_b,
-            mss_gesamt_b
-        ]
+        'Betrag [€/h]': [res_b['mss_fix'], res_b['mss_var'], mss_personal_b, mss_gesamt_b]
     })
     st.dataframe(data_mss_b.style.format({'Betrag [€/h]': '{:.2f}'}), use_container_width=True)
 
-# --- KOSTENSTRUKTUR VISUALISIERUNG ---
+# =========================
+# KOSTENSTRUKTUR VISUALISIERUNG
+# =========================
 st.divider()
 st.header("📊 Kostenstruktur (Jahreskosten)")
 
@@ -315,13 +402,15 @@ for bars in [bars1, bars2]:
         height = bar.get_height()
         if height > 1000:
             ax.text(bar.get_x() + bar.get_width()/2., height,
-                   f'{height/1000:.1f}k', ha='center', va='bottom', fontsize=8)
+                    f'{height/1000:.1f}k', ha='center', va='bottom', fontsize=8)
 
 plt.tight_layout()
 kostenstruktur_img = fig_to_base64(fig)
 st.pyplot(fig)
 
-# --- BREAK-EVEN-ANALYSE ---
+# =========================
+# BREAK-EVEN-ANALYSE
+# =========================
 st.divider()
 st.header("📈 Break-Even-Analyse")
 
@@ -339,8 +428,8 @@ for faktor in faktoren:
     df_scaled = df_serien.copy()
     df_scaled['Serien/Jahr'] = (df_scaled['Serien/Jahr'] * faktor).round().astype(int)
 
-    res_temp_a = kalkuliere_programm_detail(df_scaled, res_a['mss_fix'], res_a['mss_var'], lohn_satz, bedien_a)
-    res_temp_b = kalkuliere_programm_detail(df_scaled, res_b['mss_fix'], res_b['mss_var'], lohn_satz, bedien_b)
+    res_temp_a = kalkuliere_programm_detail(df_scaled, res_a['mss_fix'], res_a['mss_var'], lohn_satz, bedien_a, machine="A")
+    res_temp_b = kalkuliere_programm_detail(df_scaled, res_b['mss_fix'], res_b['mss_var'], lohn_satz, bedien_b, machine="B")
 
     kosten_verlauf_a.append(res_temp_a['ges_kosten'])
     kosten_verlauf_b.append(res_temp_b['ges_kosten'])
@@ -352,9 +441,9 @@ ax2.plot(stueckzahlen, kosten_verlauf_b, 's-', linewidth=2, markersize=6, label=
 
 ax2.axvline(result_a['ges_stueck'], color='red', linestyle='--', alpha=0.5, label='Aktuelles Programm')
 ax2.scatter([result_a['ges_stueck']], [result_a['ges_kosten']], s=150, color='#6b7280',
-           edgecolors='red', linewidths=2, zorder=5)
+            edgecolors='red', linewidths=2, zorder=5)
 ax2.scatter([result_b['ges_stueck']], [result_b['ges_kosten']], s=150, color='#3b82f6',
-           edgecolors='red', linewidths=2, zorder=5)
+            edgecolors='red', linewidths=2, zorder=5)
 
 ax2.set_xlabel('Stückzahl pro Jahr', fontsize=12)
 ax2.set_ylabel('Gesamtkosten [€]', fontsize=12)
@@ -365,7 +454,9 @@ plt.tight_layout()
 breakeven_img = fig_to_base64(fig2)
 st.pyplot(fig2)
 
-# --- STÜCKKOSTENDETAILS ---
+# =========================
+# STÜCKKOSTENDETAILS
+# =========================
 st.divider()
 st.header("🔍 Stückkostenvergleich nach Serie")
 
@@ -387,7 +478,9 @@ st.dataframe(
     use_container_width=True
 )
 
-# --- DETAILLIERTE AUFSCHLÜSSELUNG ---
+# =========================
+# DETAILLIERTE AUFSCHLÜSSELUNG
+# =========================
 with st.expander("📋 Detaillierte Kostenaufschlüsselung"):
     tab1, tab2 = st.tabs([name_a, name_b])
 
@@ -423,7 +516,9 @@ with st.expander("📋 Detaillierte Kostenaufschlüsselung"):
         )
         st.write(f"**Summe Gesamtkosten:** {result_b['ges_kosten']:,.2f} €")
 
-# --- FIXKOSTENAUFSCHLÜSSELUNG ---
+# =========================
+# FIXKOSTENAUFSCHLÜSSELUNG
+# =========================
 with st.expander("💶 Fixkostenaufschlüsselung"):
     col_fix1, col_fix2 = st.columns(2)
 
@@ -451,8 +546,14 @@ with st.expander("💶 Fixkostenaufschlüsselung"):
         })
         st.dataframe(fix_df_b.style.format({'Betrag [€/Jahr]': '{:,.2f}'}), use_container_width=True)
 
+# =========================
+# HTML REPORT
+# =========================
 def generate_html_report():
     """Generiert einen vollständigen HTML-Bericht"""
+    amort_text = f"{amortisation:.1f}" if amortisation is not None else "N/A"
+    npv_text = f"{npv_b_vs_a:,.0f} €" if npv_b_vs_a is not None else "N/A"
+
     html_content = f"""
     <!DOCTYPE html>
     <html lang="de">
@@ -585,18 +686,19 @@ def generate_html_report():
             <h2>{name_a} vs. {name_b}</h2>
             <div class="date">Erstellt am: {datetime.now().strftime("%d.%m.%Y %H:%M Uhr")}</div>
         </div>
+
         <div class="section">
             <h2>🎯 Kernergebnisse</h2>
             <div class="metrics-grid">
                 <div class="metric-card">
                     <div class="metric-label">Kosten {name_a}</div>
                     <div class="metric-value">{result_a['ges_kosten']:,.0f} €</div>
-                    <div class="metric-sub">Auslastung: {auslastung_a:.1f}% ({result_a['ges_stunden']:.0f}h/{res_a['stunden_effektiv']:.0f}h)</div>
+                    <div class="metric-sub">Auslastung: {ausl_a*100:.1f}% ({result_a['ges_stunden']:.0f}h/{res_a['stunden_effektiv']:.0f}h)</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Kosten {name_b}</div>
                     <div class="metric-value">{result_b['ges_kosten']:,.0f} €</div>
-                    <div class="metric-sub">Auslastung: {auslastung_b:.1f}% ({result_b['ges_stunden']:.0f}h/{res_b['stunden_effektiv']:.0f}h)</div>
+                    <div class="metric-sub">Auslastung: {ausl_b*100:.1f}% ({result_b['ges_stunden']:.0f}h/{res_b['stunden_effektiv']:.0f}h)</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Ersparnis pro Jahr</div>
@@ -605,8 +707,13 @@ def generate_html_report():
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Amortisation</div>
-                    <div class="metric-value">{f"{amortisation:.1f}" if amortisation else "N/A"} Jahre</div>
-                    <div class="metric-sub">{'✅ Wirtschaftlich' if amortisation and amortisation < n else '⚠️ Kritisch prüfen'}</div>
+                    <div class="metric-value">{amort_text} Jahre</div>
+                    <div class="metric-sub">Mehrinvest: {mehrinvest:,.0f} €</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">NPV (B statt A)</div>
+                    <div class="metric-value">{npv_text}</div>
+                    <div class="metric-sub">bei i={zins_satz*100:.1f}%, n={n}</div>
                 </div>
             </div>
 
@@ -671,7 +778,10 @@ def generate_html_report():
             <h2>⚙️ Eingabeparameter</h2>
             <table>
                 <tr><th>Parameter</th><th>Wert</th></tr>
-                <tr><td>Anschaffungskosten</td><td>{ak:,.0f} €</td></tr>
+                <tr><td>Anschaffungskosten A</td><td>{ak_a:,.0f} €</td></tr>
+                <tr><td>Anschaffungskosten B</td><td>{ak_b:,.0f} €</td></tr>
+                <tr><td>Restwert A</td><td>{restwert_a:,.0f} €</td></tr>
+                <tr><td>Restwert B</td><td>{restwert_b:,.0f} €</td></tr>
                 <tr><td>Nutzungsdauer</td><td>{n} Jahre</td></tr>
                 <tr><td>Kalkulatorischer Zinssatz</td><td>{zins_satz*100:.1f}%</td></tr>
                 <tr><td>Lohnsatz</td><td>{lohn_satz:.2f} €/h</td></tr>
@@ -690,10 +800,13 @@ def generate_html_report():
     """
     return html_content
 
-# --- EXPORT BUTTON ---
+# =========================
+# EXPORT
+# =========================
 st.divider()
 st.header("💾 Export")
 col_export1, col_export2 = st.columns(2)
+
 with col_export1:
     if st.button("📄 HTML-Bericht generieren", use_container_width=True):
         html_report = generate_html_report()
@@ -705,30 +818,37 @@ with col_export1:
             use_container_width=True
         )
         st.success("✅ HTML-Bericht erfolgreich generiert!")
+
 with col_export2:
     if st.button("📊 Excel-Export (Rohdaten)", use_container_width=True):
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             overview_data = pd.DataFrame({
-                'Kennzahl': ['Gesamtkosten', 'Gesamtstunden', 'Gesamtstückzahl', 'Auslastung', 'MSS Gesamt'],
+                'Kennzahl': ['Gesamtkosten', 'Gesamtstunden', 'Gesamtstückzahl', 'Auslastung', 'MSS Gesamt', 'Mehrinvest', 'Amortisation', 'NPV (B statt A)'],
                 name_a: [
                     f"{result_a['ges_kosten']:.2f} €",
                     f"{result_a['ges_stunden']:.1f} h",
                     f"{result_a['ges_stueck']} Stk",
-                    f"{auslastung_a:.1f}%",
-                    f"{mss_gesamt_a:.2f} €/h"
+                    f"{ausl_a*100:.1f}%",
+                    f"{mss_gesamt_a:.2f} €/h",
+                    "",
+                    "",
+                    ""
                 ],
                 name_b: [
                     f"{result_b['ges_kosten']:.2f} €",
                     f"{result_b['ges_stunden']:.1f} h",
                     f"{result_b['ges_stueck']} Stk",
-                    f"{auslastung_b:.1f}%",
-                    f"{mss_gesamt_b:.2f} €/h"
+                    f"{ausl_b*100:.1f}%",
+                    f"{mss_gesamt_b:.2f} €/h",
+                    f"{mehrinvest:.2f} €",
+                    f"{amortisation:.2f} Jahre" if amortisation is not None else "N/A",
+                    f"{npv_b_vs_a:.2f} €" if npv_b_vs_a is not None else "N/A"
                 ]
             })
             overview_data.to_excel(writer, sheet_name='Übersicht', index=False)
-            result_a['details'].to_excel(writer, sheet_name=name_a, index=False)
-            result_b['details'].to_excel(writer, sheet_name=name_b, index=False)
+            result_a['details'].to_excel(writer, sheet_name='Details_A', index=False)
+            result_b['details'].to_excel(writer, sheet_name='Details_B', index=False)
             df_serien.to_excel(writer, sheet_name='Produktionsprogramm', index=False)
             fix_df_a.to_excel(writer, sheet_name='Fixkosten_A', index=False)
             fix_df_b.to_excel(writer, sheet_name='Fixkosten_B', index=False)
