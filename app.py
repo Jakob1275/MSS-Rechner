@@ -266,7 +266,7 @@ mehrinvest = ak_b - ak_a
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric("Kosten Maschine A", f"{result_a['ges_kosten']:.0f} €",
+    st.metric("Kosten Maschine A", f"{result_a['ges_kosten']:,.0f} €".replace(",", "."),
               help="Gesamtkosten für das Produktionsprogramm pro Jahr")
     st.caption(f"⏱️ Auslastung: {ausl_a*100:.1f}% ({result_a['ges_stunden']:.0f}/{res_a['stunden_effektiv']:.0f} h)")
 
