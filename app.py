@@ -271,12 +271,12 @@ with col1:
     st.caption(f"⏱️ Auslastung: {ausl_a*100:.1f}% ({result_a['ges_stunden']:.0f}/{res_a['stunden_effektiv']:.0f} h)")
 
 with col2:
-    st.metric("Kosten Maschine B", f"{result_b['ges_kosten']:.0f} €",
+    st.metric("Kosten Maschine B", f"{result_b['ges_kosten']:,.0f} €".replace(",", "."),
               help="Gesamtkosten für das Produktionsprogramm pro Jahr")
     st.caption(f"⏱️ Auslastung: {ausl_b*100:.1f}% ({result_b['ges_stunden']:.0f}/{res_b['stunden_effektiv']:.0f} h)")
 
 with col3:
-    st.metric("Ersparnis/Jahr", f"{ersparnis:.0f} €",
+    st.metric("Ersparnis/Jahr", f"{ersparnis:,.0f} €".replace(",", "."),
               delta=f"{ersparnis_proz:.1f}%",
               delta_color="normal" if ersparnis > 0 else "inverse",
               help="Positive Werte bedeuten: Maschine B ist günstiger")
@@ -304,7 +304,7 @@ with col4:
 # Empfehlungstext (mit Hinweis auf Kapazität)
 if ersparnis > 0:
     empfehlung_text = f"""**💡 Empfehlung: Maschine B ({name_b})** ist wirtschaftlich vorteilhaft mit einer
-    jährlichen Ersparnis von **{ersparnis:.0f} €** ({ersparnis_proz:.1f}%)."""
+    jährlichen Ersparnis von **{ersparnis:,.0f} €** ({ersparnis_proz:.1f}%)."""
     if mehrinvest > 0 and amortisation is not None:
         empfehlung_text += f" Die Mehrinvestition amortisiert sich in **{amortisation:.1f} Jahren**."
     if not vergleich_ok:
