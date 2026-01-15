@@ -137,6 +137,51 @@ def npv_alternative(ak_a, ak_b, rest_a, rest_b, annual_saving, zins, n_years):
     npv += (rest_b - rest_a) / ((1 + zins) ** n_years)
     return float(npv)
 
+def npv_alternative_series(ak_a, ak_b, rest_a, rest_b, savings_series, zins):
+    """
+    NPV aus Sicht 'B statt A' mit jährlicher Einsparungsreihe
+      t=0: - (AK_B - AK_A)
+      t=1..n: + saving_t
+      t=n: + (Rest_B - Rest_A)
+    """
+    mehrinvest = ak_b - ak_a
+    npv = -mehrinvest
+    for t, saving in enumerate(savings_series, start=1):
+        npv += float(saving) / ((1 + zins) ** t)
+    if savings_series:
+        n_years = len(savings_series)
+        npv += (rest_b - rest_a) / ((1 + zins) ** n_years)
+    return float(npv)
+
+def discounted_payback(mehrinvest, savings_series, zins):
+    """Dynamische Amortisation (diskontierte Zahlungsreihe)."""
+    if mehrinvest <= 0:
+        return 0.0
+    cumulative = 0.0
+    for t, saving in enumerate(savings_series, start=1):
+        cumulative += float(saving) / ((1 + zins) ** t)
+        if cumulative >= mehrinvest:
+            return float(t)
+    return None
+
+def annual_costs_series(res, result, lohn, bedien_factor, years, cost_escalation, prod_growth):
+    """
+    Vereinfachte Kostenreihe:
+    - Fixkosten eskalieren mit cost_escalation
+    - Variable Kosten eskalieren mit cost_escalation und skalieren mit Produktionswachstum
+    """
+    fixed0 = float(res['fix_jahr'])
+    variable0 = (float(res['mss_var']) + float(lohn) * float(bedien_factor)) * float(result['ges_stunden'])
+
+    series = []
+    for t in range(years):
+        esc = (1 + cost_escalation) ** t
+        prod = (1 + prod_growth) ** t
+        fixed = fixed0 * esc
+        variable = variable0 * esc * prod
+        series.append(float(fixed + variable))
+    return series
+
 def kapazitaetscheck(result, res):
     if res['stunden_effektiv'] <= 0:
         return False, 0.0
@@ -159,6 +204,11 @@ with st.sidebar:
     lohn_satz = st.number_input("Lohnkosten [€/h]", value=65.0, step=1.0)
     strom_preis = st.number_input("Strompreis [€/kWh]", value=0.30, step=0.01)
     raum_preis = st.number_input("Raumkosten [€/m²/Monat]", value=15.0, step=1.0)
+
+    st.divider()
+    st.subheader("Annahmen (Erste Abschätzung)")
+    kosten_steigerung = st.slider("Kostensteigerung p.a. [%]", 0.0, 8.0, 2.0, 0.25) / 100
+    prod_wachstum = st.slider("Produktionswachstum p.a. [%]", -5.0, 10.0, 0.0, 0.5) / 100
 
     st.divider()
     st.caption("Optional (für Barwert/NPV): Restwert am Ende der Nutzungsdauer")
@@ -263,6 +313,11 @@ ersparnis = result_a['ges_kosten'] - result_b['ges_kosten']
 ersparnis_proz = (ersparnis / result_a['ges_kosten'] * 100) if result_a['ges_kosten'] > 0 else 0.0
 mehrinvest = ak_b - ak_a
 
+# Kostenreihen für dynamische Bewertung
+costs_a_series = annual_costs_series(res_a, result_a, lohn_satz, bedien_a, int(n), kosten_steigerung, prod_wachstum)
+costs_b_series = annual_costs_series(res_b, result_b, lohn_satz, bedien_b, int(n), kosten_steigerung, prod_wachstum)
+savings_series = [a - b for a, b in zip(costs_a_series, costs_b_series)]
+
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
@@ -301,6 +356,13 @@ with col4:
         st.metric("Amortisation", "N/A")
         st.info("ℹ️ Keine Einsparung durch B")
 
+# Dynamische Amortisation (diskontiert)
+dyn_amort = discounted_payback(mehrinvest, savings_series, zins_satz)
+if dyn_amort is not None:
+    st.caption(f"Dynamische Amortisation (diskontiert): {dyn_amort:.0f} Jahre")
+else:
+    st.caption("Dynamische Amortisation (diskontiert): nicht erreicht")
+
 # Empfehlungstext (mit Hinweis auf Kapazität)
 if ersparnis > 0:
     empfehlung_text = f"""**💡 Empfehlung: Maschine B ({name_b})** ist wirtschaftlich vorteilhaft mit einer
@@ -328,12 +390,20 @@ if vergleich_ok:
         zins=zins_satz,
         n_years=n
     )
+    npv_b_vs_a_dyn = npv_alternative_series(
+        ak_a=ak_a, ak_b=ak_b,
+        rest_a=restwert_a, rest_b=restwert_b,
+        savings_series=savings_series,
+        zins=zins_satz
+    )
     if npv_b_vs_a >= 0:
         st.success(f"✅ NPV (B statt A): {npv_b_vs_a:.0f} €  → B ist aus Barwertsicht vorteilhaft.")
     else:
         st.warning(f"⚠️ NPV (B statt A): {npv_b_vs_a:.0f} €  → A ist aus Barwertsicht vorteilhafter.")
+    st.caption(f"NPV dynamisch (mit Kostensteigerung/Produktionswachstum): {npv_b_vs_a_dyn:.0f} €")
 else:
     npv_b_vs_a = None
+    npv_b_vs_a_dyn = None
     st.info("NPV wird nicht ausgewertet, da mindestens eine Alternative kapazitiv nicht machbar ist.")
 
 # =========================
