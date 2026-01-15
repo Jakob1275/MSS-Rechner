@@ -7,12 +7,12 @@ from io import BytesIO
 from datetime import datetime
 
 # --- SEITENKONFIGURATION ---
-st.set_page_config(page_title="Wirtschaftlichkeitsvergleich Maschinen", layout="wide")
+st.set_page_config(page_title="Wirtschaftlichkeitsvergleich Werkzeugmaschinen", layout="wide")
 
-st.title("📊 Wirtschaftlichkeitsvergleich: Manuell vs. Automation")
+st.title("Wirtschaftlichkeitsvergleich Werkzeugmaschinen")
 st.markdown("""
 Detaillierter Vergleich zweier Investitionsalternativen mit Fixkosten, variablen Kosten,
-Stückkostenkalkulation, Break-Even-Analyse, Amortisation und Barwert (NPV).
+Stückkostenkalkulation, Break-Even-Analyse, Amortisation und Barwert.
 """)
 
 # =========================
@@ -52,7 +52,7 @@ def berechne_mss(ak, n, zins, wartung_satz, raum, r_preis, vers, werkzeug, h_jah
     }
 
 def kalkuliere_programm_detail(df, mss_fix, mss_var, lohn, bedien_faktor, machine="A"):
-    """Detaillierte Kalkulation mit Stückkostenaufschlüsselung (maschine A oder B)"""
+    """Detaillierte Kalkulation mit Stückkostenaufschlüsselung (Maschine A oder B)"""
     details = []
     ges_kosten = 0.0
     ges_stunden = 0.0
@@ -148,7 +148,7 @@ def kapazitaetscheck(result, res):
 # SIDEBAR: MASCHINENPARAMETER
 # =========================
 with st.sidebar:
-    st.header("⚙️ Grundparameter")
+    st.header("Grundparameter")
 
     ak_a = st.number_input("Anschaffungskosten Maschine A [€]", value=600000, step=10000)
     ak_b = st.number_input("Anschaffungskosten Maschine B [€]", value=950000, step=10000)
@@ -156,7 +156,7 @@ with st.sidebar:
     n = st.number_input("Nutzungsdauer [Jahre]", value=20, step=1, min_value=1)
     zins_satz = st.slider("Kalk. Zinssatz [%]", 0.0, 10.0, 5.0, 0.5) / 100
 
-    lohn_satz = st.number_input("Lohnsatz (belastet) [€/h]", value=65.0, step=1.0)
+    lohn_satz = st.number_input("Lohnkosten [€/h]", value=65.0, step=1.0)
     strom_preis = st.number_input("Strompreis [€/kWh]", value=0.30, step=0.01)
     raum_preis = st.number_input("Raumkosten [€/m²/Monat]", value=15.0, step=1.0)
 
@@ -166,8 +166,8 @@ with st.sidebar:
     restwert_b = st.number_input("Restwert B am Ende [€]", value=0, step=10000, min_value=0)
 
     st.divider()
-    st.subheader("🔧 Maschine A (Manuell)")
-    name_a = st.text_input("Bezeichnung A", value="Okuma (Manuell)")
+    st.subheader("Maschine A")
+    name_a = st.text_input("Bezeichnung A", value="Okuma LT3000-2T1MY")
     h_jahr_a = st.number_input("Betriebsstunden/Jahr (A)", value=2400, step=100)
     nutzgrad_a = st.slider("Nutzungsgrad A [%]", 0, 100, 75, 5) / 100
     bedien_a = 1.0
@@ -179,8 +179,8 @@ with st.sidebar:
     werkzeug_a = st.number_input("Werkzeugkosten A [€/Jahr]", value=3000, step=500)
 
     st.divider()
-    st.subheader("🤖 Maschine B (Automation)")
-    name_b = st.text_input("Bezeichnung B", value="DMG (Automation)")
+    st.subheader("Maschine B")
+    name_b = st.text_input("Bezeichnung B", value="DMG CTX 550 mir Robo2Go")
     h_jahr_b = st.number_input("Betriebsstunden/Jahr (B)", value=5000, step=100)
     nutzgrad_b = st.slider("Nutzungsgrad B [%]", 0, 100, 85, 5) / 100
     bedien_b = st.slider("Bedienfaktor B", 0.1, 1.0, 0.3, 0.05)
@@ -202,17 +202,17 @@ res_b = berechne_mss(ak_b, n, zins_satz, wartung_b, raum_b, raum_preis, vers_b, 
 # =========================
 # PRODUKTIONSPROGRAMM
 # =========================
-st.header("📋 Produktionsprogramm")
+st.header("Produktionsprogramm")
 st.write("Definieren Sie die zu fertigenden Serien. Sie können Zeilen hinzufügen oder löschen.")
 
 default_serien = pd.DataFrame({
-    "Serie": ["Welle Typ 1", "Gehäuse groß", "Flansch klein"],
-    "Serien/Jahr": [20, 10, 50],
-    "Stück/Serie": [50, 20, 100],
-    "Bearbzeit (min/Stk) A": [10, 45, 5],
-    "Bearbzeit (min/Stk) B": [8, 30, 4],
-    "Rüstzeit (min) A": [45, 120, 30],
-    "Rüstzeit (min) B": [30, 90, 20]
+    "Serie": ["Welle Typ 1", "Welle Typ 2", "Welle Typ 3"],
+    "Serien/Jahr": [100, 100, 100],
+    "Stück/Serie": [10, 10, 10],
+    "Bearbzeit (min/Stk) A": [10, 10, 10],
+    "Bearbzeit (min/Stk) B": [12, 12, 12],
+    "Rüstzeit (min) A": [45, 45, 45],
+    "Rüstzeit (min) B": [60, 60, 60]
 })
 
 df_serien = st.data_editor(
@@ -266,17 +266,17 @@ mehrinvest = ak_b - ak_a
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric("Kosten Maschine A", f"{result_a['ges_kosten']:,.0f} €",
+    st.metric("Kosten Maschine A", f"{result_a['ges_kosten']:.0f} €",
               help="Gesamtkosten für das Produktionsprogramm pro Jahr")
     st.caption(f"⏱️ Auslastung: {ausl_a*100:.1f}% ({result_a['ges_stunden']:.0f}/{res_a['stunden_effektiv']:.0f} h)")
 
 with col2:
-    st.metric("Kosten Maschine B", f"{result_b['ges_kosten']:,.0f} €",
+    st.metric("Kosten Maschine B", f"{result_b['ges_kosten']:.0f} €",
               help="Gesamtkosten für das Produktionsprogramm pro Jahr")
     st.caption(f"⏱️ Auslastung: {ausl_b*100:.1f}% ({result_b['ges_stunden']:.0f}/{res_b['stunden_effektiv']:.0f} h)")
 
 with col3:
-    st.metric("Ersparnis/Jahr", f"{ersparnis:,.0f} €",
+    st.metric("Ersparnis/Jahr", f"{ersparnis:.0f} €",
               delta=f"{ersparnis_proz:.1f}%",
               delta_color="normal" if ersparnis > 0 else "inverse",
               help="Positive Werte bedeuten: Maschine B ist günstiger")
@@ -304,7 +304,7 @@ with col4:
 # Empfehlungstext (mit Hinweis auf Kapazität)
 if ersparnis > 0:
     empfehlung_text = f"""**💡 Empfehlung: Maschine B ({name_b})** ist wirtschaftlich vorteilhaft mit einer
-    jährlichen Ersparnis von **{ersparnis:,.0f} €** ({ersparnis_proz:.1f}%)."""
+    jährlichen Ersparnis von **{ersparnis:.0f} €** ({ersparnis_proz:.1f}%)."""
     if mehrinvest > 0 and amortisation is not None:
         empfehlung_text += f" Die Mehrinvestition amortisiert sich in **{amortisation:.1f} Jahren**."
     if not vergleich_ok:
@@ -329,9 +329,9 @@ if vergleich_ok:
         n_years=n
     )
     if npv_b_vs_a >= 0:
-        st.success(f"✅ NPV (B statt A): {npv_b_vs_a:,.0f} €  → B ist aus Barwertsicht vorteilhaft.")
+        st.success(f"✅ NPV (B statt A): {npv_b_vs_a:.0f} €  → B ist aus Barwertsicht vorteilhaft.")
     else:
-        st.warning(f"⚠️ NPV (B statt A): {npv_b_vs_a:,.0f} €  → A ist aus Barwertsicht vorteilhafter.")
+        st.warning(f"⚠️ NPV (B statt A): {npv_b_vs_a:.0f} €  → A ist aus Barwertsicht vorteilhafter.")
 else:
     npv_b_vs_a = None
     st.info("NPV wird nicht ausgewertet, da mindestens eine Alternative kapazitiv nicht machbar ist.")
@@ -702,13 +702,13 @@ def generate_html_report():
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Ersparnis pro Jahr</div>
-                    <div class="metric-value">{ersparnis:,.0f} €</div>
+                    <div class="metric-value">{ersparnis:.0f} €</div>
                     <div class="metric-sub">{ersparnis_proz:.1f}% Einsparung</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Amortisation</div>
                     <div class="metric-value">{amort_text} Jahre</div>
-                    <div class="metric-sub">Mehrinvest: {mehrinvest:,.0f} €</div>
+                    <div class="metric-sub">Mehrinvest: {mehrinvest:.0f} €</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">NPV (B statt A)</div>
