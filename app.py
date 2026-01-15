@@ -266,17 +266,17 @@ mehrinvest = ak_b - ak_a
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric("Kosten Maschine A", f"{result_a['ges_kosten']:..0f} €",
+    st.metric("Kosten Maschine A", f"{result_a['ges_kosten']:.0f} €",
               help="Gesamtkosten für das Produktionsprogramm pro Jahr")
     st.caption(f"⏱️ Auslastung: {ausl_a*100:.1f}% ({result_a['ges_stunden']:.0f}/{res_a['stunden_effektiv']:.0f} h)")
 
 with col2:
-    st.metric("Kosten Maschine B", f"{result_b['ges_kosten']:..0f} €",
+    st.metric("Kosten Maschine B", f"{result_b['ges_kosten']:.0f} €",
               help="Gesamtkosten für das Produktionsprogramm pro Jahr")
     st.caption(f"⏱️ Auslastung: {ausl_b*100:.1f}% ({result_b['ges_stunden']:.0f}/{res_b['stunden_effektiv']:.0f} h)")
 
 with col3:
-    st.metric("Ersparnis/Jahr", f"{ersparnis:..0f} €",
+    st.metric("Ersparnis/Jahr", f"{ersparnis:.0f} €",
               delta=f"{ersparnis_proz:.1f}%",
               delta_color="normal" if ersparnis > 0 else "inverse",
               help="Positive Werte bedeuten: Maschine B ist günstiger")
