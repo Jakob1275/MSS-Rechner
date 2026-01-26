@@ -18,6 +18,7 @@ Stückkostenkalkulation, Break-Even-Analyse, Amortisation und Barwert.
 # =========================
 # BERECHNUNGSFUNKTIONEN
 # =========================
+@st.cache_data(show_spinner=False)
 def berechne_mss(ak, n, zins, wartung_satz, raum, r_preis, vers, werkzeug, h_jahr, nutzgrad, kw, s_preis, restwert=0.0):
     """
     Berechnet Maschinenstundensatz und Kostenkomponenten
@@ -51,6 +52,7 @@ def berechne_mss(ak, n, zins, wartung_satz, raum, r_preis, vers, werkzeug, h_jah
         'werkzeug': werkzeug
     }
 
+@st.cache_data(show_spinner=False)
 def kalkuliere_programm_detail(df, mss_fix, mss_var, lohn, bedien_faktor, machine="A"):
     """Detaillierte Kalkulation mit Stückkostenaufschlüsselung (Maschine A oder B)"""
     details = []
@@ -164,6 +166,7 @@ def discounted_payback(mehrinvest, savings_series, zins):
             return float(t)
     return None
 
+@st.cache_data(show_spinner=False)
 def annual_costs_series(res, result, lohn, bedien_factor, years, cost_escalation, prod_growth):
     """
     Vereinfachte Kostenreihe:
@@ -248,6 +251,11 @@ res_a = berechne_mss(ak_a, n, zins_satz, wartung_a, raum_a, raum_preis, vers_a, 
 
 res_b = berechne_mss(ak_b, n, zins_satz, wartung_b, raum_b, raum_preis, vers_b, werkzeug_b,
                      h_jahr_b, nutzgrad_b, energie_b, strom_preis, restwert=restwert_b)
+
+if res_a['stunden_effektiv'] <= 0:
+    st.warning("Maschine A: Effektive Jahresstunden sind 0 oder negativ. Bitte Eingaben prüfen.")
+if res_b['stunden_effektiv'] <= 0:
+    st.warning("Maschine B: Effektive Jahresstunden sind 0 oder negativ. Bitte Eingaben prüfen.")
 
 # =========================
 # PRODUKTIONSPROGRAMM
@@ -423,7 +431,10 @@ with col_mss1:
         'Komponente': ['Fixkosten', 'Energie', 'Personal', 'GESAMT'],
         'Betrag [€/h]': [res_a['mss_fix'], res_a['mss_var'], mss_personal_a, mss_gesamt_a]
     })
-    st.dataframe(data_mss_a.style.format({'Betrag [€/h]': '{:.2f}'}), use_container_width=True)
+    st.dataframe(
+        data_mss_a.style.format({'Betrag [€/h]': '{:.2f}'}).set_properties(subset=['Betrag [€/h]'], **{'text-align': 'right'}),
+        use_container_width=True
+    )
 
 with col_mss2:
     st.subheader(f"{name_b}")
@@ -434,7 +445,10 @@ with col_mss2:
         'Komponente': ['Fixkosten', 'Energie', 'Personal', 'GESAMT'],
         'Betrag [€/h]': [res_b['mss_fix'], res_b['mss_var'], mss_personal_b, mss_gesamt_b]
     })
-    st.dataframe(data_mss_b.style.format({'Betrag [€/h]': '{:.2f}'}), use_container_width=True)
+    st.dataframe(
+        data_mss_b.style.format({'Betrag [€/h]': '{:.2f}'}).set_properties(subset=['Betrag [€/h]'], **{'text-align': 'right'}),
+        use_container_width=True
+    )
 
 # =========================
 # KOSTENSTRUKTUR VISUALISIERUNG
@@ -602,7 +616,10 @@ with st.expander("💶 Fixkostenaufschlüsselung"):
                 res_a['fix_jahr']
             ]
         })
-        st.dataframe(fix_df_a.style.format({'Betrag [€/Jahr]': '{:,.2f}'}), use_container_width=True)
+        st.dataframe(
+            fix_df_a.style.format({'Betrag [€/Jahr]': '{:,.2f}'}).set_properties(subset=['Betrag [€/Jahr]'], **{'text-align': 'right'}),
+            use_container_width=True
+        )
 
     with col_fix2:
         st.subheader(name_b)
@@ -614,7 +631,10 @@ with st.expander("💶 Fixkostenaufschlüsselung"):
                 res_b['fix_jahr']
             ]
         })
-        st.dataframe(fix_df_b.style.format({'Betrag [€/Jahr]': '{:,.2f}'}), use_container_width=True)
+        st.dataframe(
+            fix_df_b.style.format({'Betrag [€/Jahr]': '{:,.2f}'}).set_properties(subset=['Betrag [€/Jahr]'], **{'text-align': 'right'}),
+            use_container_width=True
+        )
 
 # =========================
 # HTML REPORT
@@ -622,7 +642,24 @@ with st.expander("💶 Fixkostenaufschlüsselung"):
 def generate_html_report():
     """Generiert einen vollständigen HTML-Bericht"""
     amort_text = f"{amortisation:.1f}" if amortisation is not None else "N/A"
-    npv_text = f"{npv_b_vs_a:,.0f} €" if npv_b_vs_a is not None else "N/A"
+    def fmt_eur(value, decimals=0):
+        try:
+            fmt = f"{{:,.{decimals}f}}"
+            return fmt.format(value).replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return str(value)
+
+    npv_text = f"{fmt_eur(npv_b_vs_a)} €" if npv_b_vs_a is not None else "N/A"
+
+    data_mss_a_html = data_mss_a.copy()
+    data_mss_a_html['Betrag [€/h]'] = data_mss_a_html['Betrag [€/h]'].apply(lambda v: f"{fmt_eur(v, 2)} €")
+    data_mss_b_html = data_mss_b.copy()
+    data_mss_b_html['Betrag [€/h]'] = data_mss_b_html['Betrag [€/h]'].apply(lambda v: f"{fmt_eur(v, 2)} €")
+
+    fix_df_a_html = fix_df_a.copy()
+    fix_df_a_html['Betrag [€/Jahr]'] = fix_df_a_html['Betrag [€/Jahr]'].apply(lambda v: f"{fmt_eur(v, 2)} €")
+    fix_df_b_html = fix_df_b.copy()
+    fix_df_b_html['Betrag [€/Jahr]'] = fix_df_b_html['Betrag [€/Jahr]'].apply(lambda v: f"{fmt_eur(v, 2)} €")
 
     html_content = f"""
     <!DOCTYPE html>
@@ -649,6 +686,11 @@ def generate_html_report():
             .header h1 {{
                 margin: 0;
                 font-size: 2.5em;
+            }}
+            .header h2 {{
+                margin: 10px 0 0;
+                color: #ffffff;
+                font-weight: 600;
             }}
             .header .date {{
                 margin-top: 10px;
@@ -701,6 +743,13 @@ def generate_html_report():
             th {{
                 background-color: #f8f9fa;
                 font-weight: 600;
+            }}
+            .table tbody tr:nth-child(even) {{
+                background-color: #f8f9fa;
+            }}
+            .table th + th,
+            .table td + td {{
+                text-align: right;
             }}
             tr:hover {{
                 background-color: #f8f9fa;
@@ -762,23 +811,23 @@ def generate_html_report():
             <div class="metrics-grid">
                 <div class="metric-card">
                     <div class="metric-label">Kosten {name_a}</div>
-                    <div class="metric-value">{result_a['ges_kosten']:,.0f} €</div>
+                    <div class="metric-value">{fmt_eur(result_a['ges_kosten'])} €</div>
                     <div class="metric-sub">Auslastung: {ausl_a*100:.1f}% ({result_a['ges_stunden']:.0f}h/{res_a['stunden_effektiv']:.0f}h)</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Kosten {name_b}</div>
-                    <div class="metric-value">{result_b['ges_kosten']:,.0f} €</div>
+                    <div class="metric-value">{fmt_eur(result_b['ges_kosten'])} €</div>
                     <div class="metric-sub">Auslastung: {ausl_b*100:.1f}% ({result_b['ges_stunden']:.0f}h/{res_b['stunden_effektiv']:.0f}h)</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Ersparnis pro Jahr</div>
-                    <div class="metric-value">{ersparnis:.0f} €</div>
+                    <div class="metric-value">{fmt_eur(ersparnis)} €</div>
                     <div class="metric-sub">{ersparnis_proz:.1f}% Einsparung</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Amortisation</div>
                     <div class="metric-value">{amort_text} Jahre</div>
-                    <div class="metric-sub">Mehrinvest: {mehrinvest:.0f} €</div>
+                    <div class="metric-sub">Mehrinvest: {fmt_eur(mehrinvest)} €</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">NPV (B statt A)</div>
@@ -797,11 +846,11 @@ def generate_html_report():
             <div class="two-column">
                 <div>
                     <h3>{name_a}</h3>
-                    {data_mss_a.to_html(index=False, classes='table')}
+                    {data_mss_a_html.to_html(index=False, classes='table')}
                 </div>
                 <div>
                     <h3>{name_b}</h3>
-                    {data_mss_b.to_html(index=False, classes='table')}
+                    {data_mss_b_html.to_html(index=False, classes='table')}
                 </div>
             </div>
         </div>
@@ -835,11 +884,11 @@ def generate_html_report():
             <div class="two-column">
                 <div>
                     <h3>{name_a}</h3>
-                    {fix_df_a.to_html(index=False, classes='table')}
+                    {fix_df_a_html.to_html(index=False, classes='table')}
                 </div>
                 <div>
                     <h3>{name_b}</h3>
-                    {fix_df_b.to_html(index=False, classes='table')}
+                    {fix_df_b_html.to_html(index=False, classes='table')}
                 </div>
             </div>
         </div>
